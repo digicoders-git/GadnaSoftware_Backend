@@ -93,6 +93,31 @@ const assignDuty = async (req, res) => {
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
+    // Check if user is already on special duty (deputed) - block assignment
+    const specialDuty = await Duty.findOne({
+      assignedTo: userId,
+      status: "active",
+      dutyType: "special",
+      _id: { $ne: req.params.id },
+    });
+    if (specialDuty) {
+      return res.status(400).json({
+        message: `${user.name} abhi "${specialDuty.title}" (Special Duty) pe tainat hain. Pehle unki special duty samapt karein.`,
+      });
+    }
+
+    // Check if user is already on any active duty (non-special)
+    const existingDuty = await Duty.findOne({
+      assignedTo: userId,
+      status: "active",
+      _id: { $ne: req.params.id },
+    });
+    if (existingDuty) {
+      return res.status(400).json({
+        message: `${user.name} pehle se "${existingDuty.title}" duty pe assigned hain.`,
+      });
+    }
+
     const previousUser = duty.assignedTo;
     const action = previousUser ? "reassigned" : "assigned";
 

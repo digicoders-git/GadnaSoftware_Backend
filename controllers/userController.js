@@ -28,7 +28,9 @@ const createUser = async (req, res) => {
 // @route   GET /api/users
 const getUsers = async (req, res) => {
   try {
-    const users = await User.find().populate("designation", "name").sort({ createdAt: -1 });
+    const { all } = req.query;
+    const filter = all === 'true' ? {} : { isActive: true };
+    const users = await User.find(filter).populate("designation", "name").sort({ createdAt: -1 });
     res.json(users);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -120,15 +122,10 @@ const getUnassignedUsers = async (req, res) => {
 };
 
 // @route   GET /api/users/status/overview
-// Sabhi users ko categories mein divide karo:
-// 1. available     → Na holiday, na koi active duty (assign karne ke liye ready)
-// 2. on_duty       → Kisi active duty pe assigned hain (duty type ke saath)
-// 3. on_holiday    → Abhi holiday chal rahi hai
-// 4. deputed       → Kisi aur jagah special duty pe bheje gaye hain
 const getUserStatusOverview = async (req, res) => {
   try {
     const now = new Date();
-    const allUsers = await User.find({ isActive: true });
+    const allUsers = await User.find({ isActive: true }).populate("designation", "name");
 
     // Ongoing holidays
     const ongoingHolidays = await Holiday.find({
@@ -200,18 +197,20 @@ const getUserStatusOverview = async (req, res) => {
       }
     }
 
-    // Duty-type wise summary
-    const dutyWiseSummary = Object.entries(onDuty).map(([type, users]) => ({
-      dutyType: type,
-      total: users.length,
-      users,
-    }));
+    // Duty-type wise summary (sirf wahi types jo actually users hain)
+    const dutyWiseSummary = Object.entries(onDuty)
+      .filter(([, users]) => users.length > 0)
+      .map(([type, users]) => ({
+        dutyType: type,
+        total: users.length,
+        users,
+      }));
 
     res.json({
       totalUsers: allUsers.length,
       summary: {
         available: available.length,
-        onDuty: activeDuties.length,
+        onDuty: Object.values(onDuty).reduce((sum, arr) => sum + arr.length, 0),
         onHoliday: onHoliday.length,
         deputed: deputed.length,
       },

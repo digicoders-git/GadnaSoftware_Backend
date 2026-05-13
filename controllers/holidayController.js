@@ -200,6 +200,20 @@ const getAllHolidays = async (req, res) => {
       .populate("approvedBy", "name email")
       .sort({ createdAt: -1 });
 
+    // Auto-sync status based on current time
+    const now = new Date();
+    for (const h of holidays) {
+      let correctStatus;
+      if (now >= h.startDate && now <= h.endDate) correctStatus = "ongoing";
+      else if (now > h.endDate) correctStatus = "completed";
+      else correctStatus = "upcoming";
+
+      if (h.status !== correctStatus) {
+        await Holiday.findByIdAndUpdate(h._id, { status: correctStatus });
+        h.status = correctStatus;
+      }
+    }
+
     res.json({ total: holidays.length, holidays });
   } catch (error) {
     res.status(500).json({ message: error.message });

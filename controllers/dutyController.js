@@ -5,18 +5,8 @@ const User = require("../models/User");
 // @route   POST /api/duties
 const createDuty = async (req, res) => {
   try {
-    const { title, description, location, dutyType, startDate, endDate } = req.body;
-
-    const duty = await Duty.create({
-      title,
-      description,
-      location,
-      dutyType,
-      startDate,
-      endDate,
-      createdBy: req.admin._id,
-    });
-
+    const { title, description, location } = req.body;
+    const duty = await Duty.create({ title, description, location, createdBy: req.admin._id });
     res.status(201).json(duty);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -27,7 +17,11 @@ const createDuty = async (req, res) => {
 const getDuties = async (req, res) => {
   try {
     const duties = await Duty.find()
-      .populate("assignedTo", "name phoneNumber pnoNumber")
+      .populate({
+        path: "assignments.user",
+        select: "name phoneNumber pnoNumber designation",
+        populate: { path: "designation", select: "name" },
+      })
       .populate("createdBy", "name email")
       .sort({ createdAt: -1 });
     res.json(duties);
@@ -40,7 +34,11 @@ const getDuties = async (req, res) => {
 const getDutyById = async (req, res) => {
   try {
     const duty = await Duty.findById(req.params.id)
-      .populate("assignedTo", "name phoneNumber pnoNumber")
+      .populate({
+        path: "assignments.user",
+        select: "name phoneNumber pnoNumber designation",
+        populate: { path: "designation", select: "name" },
+      })
       .populate("createdBy", "name email");
     if (!duty) return res.status(404).json({ message: "Duty not found" });
     res.json(duty);
@@ -55,13 +53,10 @@ const updateDuty = async (req, res) => {
     const duty = await Duty.findById(req.params.id);
     if (!duty) return res.status(404).json({ message: "Duty not found" });
 
-    duty.title = req.body.title || duty.title;
-    duty.description = req.body.description || duty.description;
-    duty.location = req.body.location || duty.location;
-    duty.dutyType = req.body.dutyType || duty.dutyType;
-    duty.startDate = req.body.startDate || duty.startDate;
-    duty.endDate = req.body.endDate || duty.endDate;
-    duty.status = req.body.status || duty.status;
+    if (req.body.title) duty.title = req.body.title;
+    if (req.body.description !== undefined) duty.description = req.body.description;
+    if (req.body.location !== undefined) duty.location = req.body.location;
+    if (req.body.status) duty.status = req.body.status;
 
     const updated = await duty.save();
     res.json(updated);
@@ -75,7 +70,6 @@ const deleteDuty = async (req, res) => {
   try {
     const duty = await Duty.findById(req.params.id);
     if (!duty) return res.status(404).json({ message: "Duty not found" });
-
     await Duty.deleteOne({ _id: req.params.id });
     res.json({ message: "Duty deleted successfully" });
   } catch (error) {
@@ -84,100 +78,102 @@ const deleteDuty = async (req, res) => {
 };
 
 // @route   POST /api/duties/:id/assign
+// Body: { userId, dutyType, startDate, endDate, remarks }
 const assignDuty = async (req, res) => {
   try {
-    const { userId, remarks } = req.body;
+    const { userId, dutyType, startDate, endDate, remarks } = req.body;
     const duty = await Duty.findById(req.params.id);
     if (!duty) return res.status(404).json({ message: "Duty not found" });
 
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    // Check if user is already on special duty (deputed) - block assignment
+    // Block if user is on special duty elsewhere
     const specialDuty = await Duty.findOne({
-      assignedTo: userId,
+      "assignments.user": userId,
+      "assignments.dutyType": "special",
       status: "active",
-      dutyType: "special",
       _id: { $ne: req.params.id },
     });
     if (specialDuty) {
       return res.status(400).json({
-        message: `${user.name} abhi "${specialDuty.title}" (Special Duty) pe tainat hain. Pehle unki special duty samapt karein.`,
+        message: `${user.name} पहले से "${specialDuty.title}" (विशेष ड्यूटी) पर तैनात हैं। पहले उनकी विशेष ड्यूटी पूर्ण करें।`,
       });
     }
 
-    // Check if user is already on any active duty (non-special)
+    // Block if user already assigned to any other active duty
     const existingDuty = await Duty.findOne({
-      assignedTo: userId,
+      "assignments.user": userId,
       status: "active",
       _id: { $ne: req.params.id },
     });
     if (existingDuty) {
       return res.status(400).json({
-        message: `${user.name} pehle se "${existingDuty.title}" duty pe assigned hain.`,
+        message: `${user.name} पहले से "${existingDuty.title}" ड्यूटी पर तैनात हैं। पहले उनकी मौजूदा ड्यूटी पूर्ण करें।`,
       });
     }
 
-    const previousUser = duty.assignedTo;
-    const action = previousUser ? "reassigned" : "assigned";
-
-    // If reassigning, close previous user's history entry
-    if (previousUser) {
-      const lastHistory = await DutyHistory.findOne({
-        duty: duty._id,
-        user: previousUser,
-        action: { $in: ["assigned", "reassigned"] },
-        endDate: null,
-      }).sort({ createdAt: -1 });
-
-      if (lastHistory) {
-        lastHistory.endDate = new Date();
-        lastHistory.action = "removed";
-        await lastHistory.save();
-      }
+    // Check if already assigned to THIS duty
+    const alreadyInThisDuty = duty.assignments.find(
+      (a) => a.user.toString() === userId
+    );
+    if (alreadyInThisDuty) {
+      return res.status(400).json({ message: `${user.name} पहले से इस ड्यूटी पर असाइन हैं।` });
     }
 
-    // Assign new user
-    duty.assignedTo = userId;
+    // Add to assignments array
+    duty.assignments.push({ user: userId, dutyType, startDate, endDate, remarks });
     duty.status = "active";
     await duty.save();
 
-    // Create history entry for new assignment
+    // History entry
     await DutyHistory.create({
       duty: duty._id,
       user: userId,
-      action,
-      dutyType: duty.dutyType,
+      action: "assigned",
+      dutyType,
       location: duty.location,
-      startDate: new Date(),
+      startDate: startDate || new Date(),
       endDate: null,
       remarks,
       performedBy: req.admin._id,
-      previousUser: previousUser || null,
     });
 
     const updated = await Duty.findById(duty._id)
-      .populate("assignedTo", "name phoneNumber pnoNumber")
+      .populate({
+        path: "assignments.user",
+        select: "name phoneNumber pnoNumber designation",
+        populate: { path: "designation", select: "name" },
+      })
       .populate("createdBy", "name email");
 
-    res.json({ message: `Duty ${action} successfully`, duty: updated });
+    res.json({ message: "Duty assigned successfully", duty: updated });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
 // @route   POST /api/duties/:id/remove
+// Body: { userId, remarks }
 const removeDutyAssignment = async (req, res) => {
   try {
-    const { remarks } = req.body;
+    const { userId, remarks } = req.body;
     const duty = await Duty.findById(req.params.id);
     if (!duty) return res.status(404).json({ message: "Duty not found" });
-    if (!duty.assignedTo) return res.status(400).json({ message: "No user assigned to this duty" });
+
+    const assignmentIndex = duty.assignments.findIndex(
+      (a) => a.user.toString() === userId
+    );
+    if (assignmentIndex === -1) {
+      return res.status(400).json({ message: "User not assigned to this duty" });
+    }
+
+    const assignment = duty.assignments[assignmentIndex];
 
     // Close history entry
     const lastHistory = await DutyHistory.findOne({
       duty: duty._id,
-      user: duty.assignedTo,
+      user: userId,
       endDate: null,
     }).sort({ createdAt: -1 });
 
@@ -188,21 +184,20 @@ const removeDutyAssignment = async (req, res) => {
       await lastHistory.save();
     }
 
-    // Create a removed history record
     await DutyHistory.create({
       duty: duty._id,
-      user: duty.assignedTo,
+      user: userId,
       action: "removed",
-      dutyType: duty.dutyType,
+      dutyType: assignment.dutyType,
       location: duty.location,
-      startDate: lastHistory?.startDate || duty.startDate,
+      startDate: lastHistory?.startDate || assignment.startDate,
       endDate: new Date(),
       remarks,
       performedBy: req.admin._id,
     });
 
-    duty.assignedTo = null;
-    duty.status = "pending";
+    duty.assignments.splice(assignmentIndex, 1);
+    if (duty.assignments.length === 0) duty.status = "pending";
     await duty.save();
 
     res.json({ message: "Duty assignment removed successfully" });
@@ -212,16 +207,18 @@ const removeDutyAssignment = async (req, res) => {
 };
 
 // @route   POST /api/duties/:id/complete
+// Body: { remarks } — completes entire duty (all assignments)
 const completeDuty = async (req, res) => {
   try {
     const { remarks } = req.body;
     const duty = await Duty.findById(req.params.id);
     if (!duty) return res.status(404).json({ message: "Duty not found" });
 
-    if (duty.assignedTo) {
+    // Close all open history entries
+    for (const assignment of duty.assignments) {
       const lastHistory = await DutyHistory.findOne({
         duty: duty._id,
-        user: duty.assignedTo,
+        user: assignment.user,
         endDate: null,
       }).sort({ createdAt: -1 });
 
@@ -233,8 +230,8 @@ const completeDuty = async (req, res) => {
       }
     }
 
+    duty.assignments = [];
     duty.status = "completed";
-    duty.endDate = new Date();
     await duty.save();
 
     res.json({ message: "Duty marked as completed" });

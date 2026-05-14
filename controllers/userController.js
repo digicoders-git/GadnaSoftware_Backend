@@ -100,9 +100,11 @@ const getUnassignedUsers = async (req, res) => {
     // Users with active duty
     const activeDuties = await Duty.find({
       status: "active",
-      assignedTo: { $ne: null },
-    }).select("assignedTo");
-    const assignedUserIds = activeDuties.map((d) => d.assignedTo.toString());
+      "assignments.0": { $exists: true },
+    }).select("assignments");
+    const assignedUserIds = activeDuties.flatMap((d) =>
+      d.assignments.map((a) => a.user.toString())
+    );
 
     // Unassigned = not on holiday AND not on active duty
     const unassignedUsers = allUsers.filter(
@@ -132,36 +134,54 @@ const getUserStatusOverview = async (req, res) => {
       startDate: { $lte: now },
       endDate: { $gte: now },
     }).populate("user", "name phoneNumber pnoNumber");
-    const holidayUserIds = new Set(ongoingHolidays.map((h) => h.user._id.toString()));
+    const holidayUserIds = new Set(
+      ongoingHolidays
+        .filter(h => h.user) // Filter out null users
+        .map((h) => h.user._id.toString())
+    );
 
     // Active duties with assigned users
     const activeDuties = await Duty.find({
       status: "active",
-      assignedTo: { $ne: null },
-    }).populate("assignedTo", "name phoneNumber pnoNumber");
+      "assignments.0": { $exists: true },
+    }).populate("assignments.user", "name phoneNumber pnoNumber");
 
-    // Map: userId -> duty info
+    // Map: userId -> assignment info (dutyType, title, location, startDate, dutyId)
     const userDutyMap = {};
     for (const duty of activeDuties) {
-      if (duty.assignedTo) {
-        userDutyMap[duty.assignedTo._id.toString()] = {
-          dutyId: duty._id,
-          title: duty.title,
-          dutyType: duty.dutyType,
-          location: duty.location,
-          startDate: duty.startDate,
-        };
+      for (const assignment of duty.assignments) {
+        if (assignment.user) {
+          userDutyMap[assignment.user._id.toString()] = {
+            dutyId: duty._id,
+            title: duty.title,
+            dutyType: assignment.dutyType,
+            location: duty.location,
+            startDate: assignment.startDate,
+          };
+        }
       }
     }
 
     const available = [];
-    const onDuty = {};
     const onHoliday = [];
     const deputed = [];
 
-    // Initialize duty type buckets from active duties
-    const dutyTypes = [...new Set(activeDuties.map((d) => d.dutyType))];
+    // Initialize duty type buckets from active duties - get unique dutyTypes from assignments
+    const dutyTypes = new Set();
+    for (const duty of activeDuties) {
+      for (const assignment of duty.assignments) {
+        if (assignment.dutyType) {
+          dutyTypes.add(assignment.dutyType);
+        }
+      }
+    }
+    const onDuty = {};
     dutyTypes.forEach((type) => (onDuty[type] = []));
+
+    // Also initialize with common types
+    ['patrol', 'guard', 'investigation', 'traffic', 'special', 'other'].forEach(type => {
+      if (!onDuty[type]) onDuty[type] = [];
+    });
 
     for (const user of allUsers) {
       const uid = user._id.toString();
@@ -170,7 +190,7 @@ const getUserStatusOverview = async (req, res) => {
 
       if (isOnHoliday) {
         // Holiday pe hai - holiday details ke saath
-        const holidayRecord = ongoingHolidays.find((h) => h.user._id.toString() === uid);
+        const holidayRecord = ongoingHolidays.find((h) => h.user && h.user._id.toString() === uid);
         onHoliday.push({
           user,
           holiday: holidayRecord
@@ -237,23 +257,29 @@ const getUsersByDutyType = async (req, res) => {
 
     const duties = await Duty.find({
       status: "active",
-      dutyType,
-      assignedTo: { $ne: null },
+      "assignments.dutyType": dutyType,
     })
-      .populate("assignedTo", "name phoneNumber pnoNumber")
+      .populate("assignments.user", "name phoneNumber pnoNumber")
       .populate("createdBy", "name")
-      .sort({ startDate: -1 });
+      .sort({ createdAt: -1 });
 
-    const users = duties.map((d) => ({
-      user: d.assignedTo,
-      duty: {
-        _id: d._id,
-        title: d.title,
-        location: d.location,
-        startDate: d.startDate,
-        endDate: d.endDate,
-      },
-    }));
+    const users = [];
+    for (const duty of duties) {
+      for (const assignment of duty.assignments) {
+        if (assignment.dutyType === dutyType && assignment.user) {
+          users.push({
+            user: assignment.user,
+            duty: {
+              _id: duty._id,
+              title: duty.title,
+              location: duty.location,
+              startDate: assignment.startDate,
+              endDate: assignment.endDate,
+            },
+          });
+        }
+      }
+    }
 
     res.json({
       dutyType,

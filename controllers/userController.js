@@ -78,6 +78,7 @@ const getUsers = async (req, res) => {
             {
               $project: {
                 title: 1,
+                description: 1,
                 location: 1,
                 dutyType: 1,
                 assignment: {
@@ -312,9 +313,11 @@ const getUserStatusOverview = async (req, res) => {
           userDutyMap[assignment.user._id.toString()] = {
             dutyId: duty._id,
             title: duty.title,
+            description: duty.description,
             dutyType: assignment.dutyType,
             location: duty.location,
             startDate: assignment.startDate,
+            remarks: assignment.remarks,
           };
         }
       }
@@ -357,6 +360,7 @@ const getUserStatusOverview = async (req, res) => {
                 startDate: holidayRecord.startDate,
                 endDate: holidayRecord.endDate,
                 reason: holidayRecord.reason,
+                remarks: holidayRecord.remarks,
               }
             : null,
         });

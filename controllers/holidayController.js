@@ -5,7 +5,7 @@ const User = require("../models/User");
 // Add user to holiday
 const addHoliday = async (req, res) => {
   try {
-    const { userId, startDate, endDate, reason } = req.body;
+    const { userId, startDate, endDate, reason, remarks } = req.body;
 
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
@@ -28,6 +28,7 @@ const addHoliday = async (req, res) => {
       startDate: new Date(startDate),
       endDate: new Date(endDate),
       reason: reason || "Holiday",
+      remarks: remarks || "",
       approvedBy: req.admin._id,
     });
 
@@ -230,6 +231,7 @@ const updateHoliday = async (req, res) => {
     holiday.startDate = req.body.startDate ? new Date(req.body.startDate) : holiday.startDate;
     holiday.endDate = req.body.endDate ? new Date(req.body.endDate) : holiday.endDate;
     holiday.reason = req.body.reason || holiday.reason;
+    holiday.remarks = req.body.remarks !== undefined ? req.body.remarks : holiday.remarks;
 
     const updated = await holiday.save();
     await updated.populate("user", "name phoneNumber pnoNumber");

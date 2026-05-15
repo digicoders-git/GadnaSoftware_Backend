@@ -10,6 +10,7 @@ const holidaySchema = new mongoose.Schema(
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },
     reason: { type: String, trim: true, default: "Holiday" },
+    remarks: { type: String, trim: true },
     status: {
       type: String,
       enum: ["upcoming", "ongoing", "completed"],

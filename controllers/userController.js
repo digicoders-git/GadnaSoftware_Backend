@@ -28,11 +28,169 @@ const createUser = async (req, res) => {
 // @route   GET /api/users
 const getUsers = async (req, res) => {
   try {
-    const { all } = req.query;
-    const filter = all === 'true' ? {} : { isActive: true };
-    const users = await User.find(filter).populate("designation", "name").sort({ createdAt: -1 });
-    res.json(users);
+    const { all, page = 1, limit = 10, search = '', status = '' } = req.query;
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    const now = new Date();
+
+    const pipeline = [
+      { $match: all === 'true' ? {} : { isActive: true } },
+      {
+        $lookup: {
+          from: 'designations',
+          localField: 'designation',
+          foreignField: '_id',
+          as: 'designation'
+        }
+      },
+      { $unwind: { path: '$designation', preserveNullAndEmptyArrays: true } },
+      // Join with duties to check current duty status
+      {
+        $lookup: {
+          from: 'duties',
+          let: { userId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$status', 'active'] },
+                    {
+                      $gt: [
+                        {
+                          $size: {
+                            $filter: {
+                              input: { $ifNull: ['$assignments', []] },
+                              as: 'a',
+                              cond: { $eq: ['$$a.user', '$$userId'] }
+                            }
+                          }
+                        },
+                        0
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              $project: {
+                title: 1,
+                location: 1,
+                dutyType: 1,
+                assignment: {
+                  $arrayElemAt: [
+                    {
+                      $filter: {
+                        input: '$assignments',
+                        as: 'a',
+                        cond: { $eq: ['$$a.user', '$$userId'] }
+                      }
+                    },
+                    0
+                  ]
+                }
+              }
+            }
+          ],
+          as: 'activeDuties'
+        }
+      },
+      // Join with holidays to check current holiday status
+      {
+        $lookup: {
+          from: 'holidays',
+          let: { userId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$user', '$$userId'] },
+                    { $lte: ['$startDate', now] },
+                    { $gte: ['$endDate', now] }
+                  ]
+                }
+              }
+            }
+          ],
+          as: 'currentHolidays'
+        }
+      },
+      // Calculate Status and Flatten details
+      {
+        $addFields: {
+          activeDuty: { $arrayElemAt: ['$activeDuties', 0] },
+          currentHoliday: { $arrayElemAt: ['$currentHolidays', 0] },
+          currentStatus: {
+            $cond: [
+              { $gt: [{ $size: '$currentHolidays' }, 0] },
+              'onHoliday',
+              {
+                $cond: [
+                  { $gt: [{ $size: '$activeDuties' }, 0] },
+                  'onDuty',
+                  'available'
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ];
+
+    // Search Filter
+    if (search) {
+      pipeline.push({
+        $match: {
+          $or: [
+            { name: { $regex: search, $options: 'i' } },
+            { pnoNumber: { $regex: search, $options: 'i' } },
+            { phoneNumber: { $regex: search, $options: 'i' } },
+            { 'designation.name': { $regex: search, $options: 'i' } }
+          ]
+        }
+      });
+    }
+
+    // Status Filter
+    if (status) {
+      pipeline.push({ $match: { currentStatus: status } });
+    }
+
+    // Duty Type Filter (e.g., 'special' for deputed)
+    const { dutyType } = req.query;
+    if (dutyType) {
+      pipeline.push({ $match: { 'activeDuty.dutyType': dutyType } });
+    }
+
+    // Clone pipeline for count
+    const countPipeline = [...pipeline, { $count: 'total' }];
+    const countResult = await User.aggregate(countPipeline);
+    const total = countResult.length > 0 ? countResult[0].total : 0;
+
+    // Add sort
+    pipeline.push({ $sort: { createdAt: -1 } });
+
+    // Apply pagination unless explicitly disabled
+    const { pagination } = req.query;
+    if (pagination !== 'false') {
+      pipeline.push({ $skip: skip });
+      pipeline.push({ $limit: limitNum });
+    }
+
+    const users = await User.aggregate(pipeline);
+
+    res.json({
+      users,
+      total,
+      pages: Math.ceil(total / limitNum),
+      currentPage: pageNum
+    });
   } catch (error) {
+    console.error('getUsers aggregation error:', error);
     res.status(500).json({ message: error.message });
   }
 };

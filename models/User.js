@@ -8,7 +8,7 @@ const userSchema = new mongoose.Schema(
       ref: "Designation",
       required: true,
     },
-    phoneNumber: { type: String, required: true, unique: true, trim: true },
+    phoneNumber: { type: String, required: false, unique: true, sparse: true, trim: true },
     pnoNumber: { type: String, required: true, unique: true, trim: true },
     isActive: { type: Boolean, default: true },
   },

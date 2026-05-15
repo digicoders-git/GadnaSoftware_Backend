@@ -170,7 +170,6 @@ const removeDutyAssignment = async (req, res) => {
 
     const assignment = duty.assignments[assignmentIndex];
 
-    // Close history entry
     const lastHistory = await DutyHistory.findOne({
       duty: duty._id,
       user: userId,
@@ -182,19 +181,20 @@ const removeDutyAssignment = async (req, res) => {
       lastHistory.action = "removed";
       lastHistory.remarks = remarks || lastHistory.remarks;
       await lastHistory.save();
+    } else {
+      // Fallback: create a new entry if for some reason history is missing
+      await DutyHistory.create({
+        duty: duty._id,
+        user: userId,
+        action: "removed",
+        dutyType: assignment.dutyType,
+        location: duty.location,
+        startDate: assignment.startDate,
+        endDate: new Date(),
+        remarks,
+        performedBy: req.admin._id,
+      });
     }
-
-    await DutyHistory.create({
-      duty: duty._id,
-      user: userId,
-      action: "removed",
-      dutyType: assignment.dutyType,
-      location: duty.location,
-      startDate: lastHistory?.startDate || assignment.startDate,
-      endDate: new Date(),
-      remarks,
-      performedBy: req.admin._id,
-    });
 
     duty.assignments.splice(assignmentIndex, 1);
     if (duty.assignments.length === 0) duty.status = "pending";
@@ -207,14 +207,41 @@ const removeDutyAssignment = async (req, res) => {
 };
 
 // @route   POST /api/duties/:id/complete
-// Body: { remarks } — completes entire duty (all assignments)
+// Body: { remarks, userId } — if userId provided, only completes for that user.
 const completeDuty = async (req, res) => {
   try {
-    const { remarks } = req.body;
+    const { remarks, userId } = req.body;
     const duty = await Duty.findById(req.params.id);
     if (!duty) return res.status(404).json({ message: "Duty not found" });
 
-    // Close all open history entries
+    if (userId) {
+      // Individual completion for one officer
+      const assignmentIndex = duty.assignments.findIndex(a => a.user.toString() === userId);
+      if (assignmentIndex === -1) return res.status(400).json({ message: "User not assigned to this duty" });
+
+      const assignment = duty.assignments[assignmentIndex];
+
+      const lastHistory = await DutyHistory.findOne({
+        duty: duty._id,
+        user: userId,
+        endDate: null,
+      }).sort({ createdAt: -1 });
+
+      if (lastHistory) {
+        lastHistory.endDate = new Date();
+        lastHistory.action = "completed";
+        lastHistory.remarks = remarks || lastHistory.remarks;
+        await lastHistory.save();
+      }
+
+      duty.assignments.splice(assignmentIndex, 1);
+      if (duty.assignments.length === 0) duty.status = "completed";
+      await duty.save();
+
+      return res.json({ message: "Individual duty marked as completed" });
+    }
+
+    // Entire duty completion (all assignments)
     for (const assignment of duty.assignments) {
       const lastHistory = await DutyHistory.findOne({
         duty: duty._id,

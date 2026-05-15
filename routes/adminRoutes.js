@@ -15,11 +15,11 @@ router.put("/me/change-password", protect, changeMyPassword);
 
 router.route("/")
   .get(protect, getAdmins)
-  .post(protect, superAdminOnly, createAdmin);
+  .post(protect, createAdmin);
 
 router.route("/:id")
   .get(protect, getAdminById)
-  .put(protect, superAdminOnly, updateAdmin)
-  .delete(protect, superAdminOnly, deleteAdmin);
+  .put(protect, updateAdmin)
+  .delete(protect, deleteAdmin);
 
 module.exports = router;

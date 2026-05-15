@@ -10,19 +10,27 @@ const generateToken = (id) => {
 // @route   POST /api/admin
 const createAdmin = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, phoneNumber, password, role } = req.body;
 
-    const adminExists = await Admin.findOne({ email });
-    if (adminExists) {
-      return res.status(400).json({ message: "Admin already exists" });
+    const emailExists = await Admin.findOne({ email });
+    if (emailExists) {
+      return res.status(400).json({ message: "इस ईमेल के साथ एडमिन पहले से मौजूद है" });
     }
 
-    const admin = await Admin.create({ name, email, password, role });
+    if (phoneNumber) {
+      const phoneExists = await Admin.findOne({ phoneNumber });
+      if (phoneExists) {
+        return res.status(400).json({ message: "इस मोबाइल नंबर के साथ एडमिन पहले से मौजूद है" });
+      }
+    }
+
+    const admin = await Admin.create({ name, email, phoneNumber, password, role });
 
     res.status(201).json({
       _id: admin._id,
       name: admin.name,
       email: admin.email,
+      phoneNumber: admin.phoneNumber,
       role: admin.role,
       token: generateToken(admin._id),
     });
@@ -67,6 +75,7 @@ const updateAdmin = async (req, res) => {
 
     admin.name = req.body.name || admin.name;
     admin.email = req.body.email || admin.email;
+    admin.phoneNumber = req.body.phoneNumber || admin.phoneNumber;
     admin.role = req.body.role || admin.role;
     admin.isActive = req.body.isActive !== undefined ? req.body.isActive : admin.isActive;
 
@@ -80,6 +89,7 @@ const updateAdmin = async (req, res) => {
       _id: updatedAdmin._id,
       name: updatedAdmin.name,
       email: updatedAdmin.email,
+      phoneNumber: updatedAdmin.phoneNumber,
       role: updatedAdmin.role,
       isActive: updatedAdmin.isActive,
     });
@@ -108,22 +118,27 @@ const deleteAdmin = async (req, res) => {
 // @route   POST /api/admin/login
 const loginAdmin = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { identifier, password } = req.body; // 'identifier' replaces 'email'
 
-    const admin = await Admin.findOne({ email });
+    // Search by email OR phone
+    const admin = await Admin.findOne({
+      $or: [{ email: identifier?.toLowerCase() }, { phoneNumber: identifier }]
+    });
+
     if (!admin || !admin.isActive) {
-      return res.status(401).json({ message: "Invalid credentials or account inactive" });
+      return res.status(401).json({ message: "गलत क्रेडेंशियल्स या अकाउंट निष्क्रिय है" });
     }
 
     const isMatch = await admin.matchPassword(password);
     if (!isMatch) {
-      return res.status(401).json({ message: "Invalid credentials" });
+      return res.status(401).json({ message: "गलत पासवर्ड" });
     }
 
     res.json({
       _id: admin._id,
       name: admin.name,
       email: admin.email,
+      phoneNumber: admin.phoneNumber,
       role: admin.role,
       token: generateToken(admin._id),
     });
@@ -150,17 +165,22 @@ const updateMyProfile = async (req, res) => {
     const admin = await Admin.findById(req.admin._id);
     if (!admin) return res.status(404).json({ message: "Admin not found" });
 
-    const { name, email } = req.body;
+    const { name, email, phoneNumber } = req.body;
     if (email && email !== admin.email) {
       const exists = await Admin.findOne({ email });
       if (exists) return res.status(400).json({ message: "यह ईमेल पहले से उपयोग में है" });
     }
+    if (phoneNumber && phoneNumber !== admin.phoneNumber) {
+      const exists = await Admin.findOne({ phoneNumber });
+      if (exists) return res.status(400).json({ message: "यह मोबाइल नंबर पहले से उपयोग में है" });
+    }
 
     admin.name = name || admin.name;
     admin.email = email || admin.email;
+    admin.phoneNumber = phoneNumber || admin.phoneNumber;
     const updated = await admin.save();
 
-    res.json({ _id: updated._id, name: updated.name, email: updated.email, role: updated.role });
+    res.json({ _id: updated._id, name: updated.name, email: updated.email, phoneNumber: updated.phoneNumber, role: updated.role });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

@@ -164,7 +164,7 @@ const getUsers = async (req, res) => {
     // Duty Type Filter (e.g., 'special' for deputed)
     const { dutyType } = req.query;
     if (dutyType) {
-      pipeline.push({ $match: { 'activeDuty.dutyType': dutyType } });
+      pipeline.push({ $match: { 'activeDuty.assignment.dutyType': dutyType } });
     }
 
     // Clone pipeline for count

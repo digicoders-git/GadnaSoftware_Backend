@@ -1,6 +1,7 @@
 const Duty = require("../models/Duty");
 const DutyHistory = require("../models/DutyHistory");
 const User = require("../models/User");
+const DutyType = require("../models/DutyType");
 
 // @route   POST /api/duties
 const createDuty = async (req, res) => {
@@ -267,6 +268,34 @@ const completeDuty = async (req, res) => {
   }
 };
 
+// @route   GET /api/duties/types
+const getDutyTypes = async (req, res) => {
+  try {
+    const types = await DutyType.find().sort({ createdAt: 1 });
+    res.json(types);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @route   POST /api/duties/types
+const createDutyType = async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: "Duty type name is required" });
+    }
+    const exists = await DutyType.findOne({ name: name.trim() });
+    if (exists) {
+      return res.status(400).json({ message: "Duty type already exists" });
+    }
+    const newType = await DutyType.create({ name: name.trim() });
+    res.status(201).json(newType);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   createDuty,
   getDuties,
@@ -276,4 +305,6 @@ module.exports = {
   assignDuty,
   removeDutyAssignment,
   completeDuty,
+  getDutyTypes,
+  createDutyType,
 };

@@ -7,13 +7,12 @@ const dutySchema = new mongoose.Schema(
     location: { type: String, trim: true },
     dutyType: {
       type: String,
-      enum: ["patrol", "guard", "investigation", "traffic", "special", "other"],
       default: "other",
     },
     assignments: [
       {
         user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-        dutyType: { type: String, enum: ["patrol", "guard", "investigation", "traffic", "special", "other"], default: "other" },
+        dutyType: { type: String, default: "other" },
         startDate: { type: Date, default: null },
         endDate: { type: Date, default: null },
         remarks: { type: String, trim: true },
